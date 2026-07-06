@@ -9,6 +9,13 @@ export const todayISO = () => new Date().toISOString().slice(0, 10);
 export async function signIn(email, password) {
   return supabase.auth.signInWithPassword({ email, password });
 }
+export async function signUp({ email, password, full_name, team_id }) {
+  // full_name + team_id ride along as metadata; the DB trigger writes them to the profile.
+  return supabase.auth.signUp({
+    email, password,
+    options: { data: { full_name, team_id: team_id || "" } },
+  });
+}
 export async function signOut() {
   return supabase.auth.signOut();
 }

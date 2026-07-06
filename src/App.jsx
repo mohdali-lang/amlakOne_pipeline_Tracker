@@ -112,16 +112,48 @@ const Center = ({ children }) => (
 //  AUTH
 // ============================================================
 function AuthGate() {
+  const [mode, setMode] = useState("signin");   // 'signin' | 'signup'
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
+  const [teamId, setTeamId] = useState("");
+  const [teams, setTeams] = useState([]);
   const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const DOMAIN = "@amlakone.ae";
+
+  useEffect(() => { api.getTeams().then(setTeams).catch(() => {}); }, []);
+
   const submit = async () => {
-    setBusy(true); setErr("");
-    const { error } = await api.signIn(email.trim(), pw);
-    if (error) setErr(error.message);
-    setBusy(false);
+    setErr(""); setMsg("");
+    const mail = email.trim().toLowerCase();
+    if (!mail.endsWith(DOMAIN)) return setErr(`Use your ${DOMAIN} email address.`);
+    if (mode === "signup") {
+      if (!fullName.trim()) return setErr("Please enter your full name.");
+      if (pw.length < 6) return setErr("Password must be at least 6 characters.");
+      setBusy(true);
+      const { data, error } = await api.signUp({ email: mail, password: pw, full_name: fullName.trim(), team_id: teamId });
+      setBusy(false);
+      if (error) return setErr(error.message);
+      if (!data.session) setMsg("Account created. Check your email to confirm, then sign in.");
+      // if a session is returned, App's auth listener switches you in automatically
+    } else {
+      setBusy(true);
+      const { error } = await api.signIn(mail, pw);
+      setBusy(false);
+      if (error) return setErr(error.message);
+    }
   };
+
+  const tab = (m, label) => (
+    <button onClick={() => { setMode(m); setErr(""); setMsg(""); }}
+      style={{ flex: 1, border: "none", cursor: "pointer", borderRadius: 8, padding: "8px 0", fontSize: 13, fontWeight: 600,
+        background: mode === m ? `linear-gradient(135deg,${C.gold},${C.goldHi})` : "transparent", color: mode === m ? C.bg : C.mut }}>
+      {label}
+    </button>
+  );
+
   return (
     <div style={{ background: C.bg, minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: "'DM Sans',sans-serif", padding: 20 }}>
       <div style={{ width: "100%", maxWidth: 360 }}>
@@ -133,11 +165,32 @@ function AuthGate() {
           </div>
         </div>
         <div style={{ background: C.surf, border: `1px solid ${C.line}`, borderRadius: 16, padding: 20 }}>
-          <Field label="Email"><input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@amlakone.ae" /></Field>
+          <div style={{ display: "flex", gap: 4, background: C.bg2, padding: 4, borderRadius: 11, border: `1px solid ${C.line}`, marginBottom: 16 }}>
+            {tab("signin", "Sign in")}{tab("signup", "Create account")}
+          </div>
+          {mode === "signup" && (
+            <>
+              <Field label="Full name"><input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Ahmed Hassan" /></Field>
+              {teams.length > 0 && (
+                <Field label="Your team">
+                  <select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+                    <option value="">Select your team…</option>
+                    {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </Field>
+              )}
+            </>
+          )}
+          <Field label="Company email"><input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder={`you${DOMAIN}`} /></Field>
           <Field label="Password"><input value={pw} onChange={(e) => setPw(e.target.value)} type="password" onKeyDown={(e) => e.key === "Enter" && submit()} /></Field>
           {err && <div style={{ color: C.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
-          <button onClick={submit} disabled={busy} style={{ ...goldBtn, width: "100%", padding: 11, opacity: busy ? 0.6 : 1 }}>{busy ? "Signing in…" : "Sign in"}</button>
-          <div style={{ fontSize: 12, color: C.mut2, marginTop: 12, textAlign: "center" }}>Accounts are created by management in Supabase.</div>
+          {msg && <div style={{ color: C.green, fontSize: 13, marginBottom: 10 }}>{msg}</div>}
+          <button onClick={submit} disabled={busy} style={{ ...goldBtn, width: "100%", padding: 11, opacity: busy ? 0.6 : 1 }}>
+            {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Sign in"}
+          </button>
+          <div style={{ fontSize: 12, color: C.mut2, marginTop: 12, textAlign: "center" }}>
+            {mode === "signup" ? "Only @amlakone.ae emails can register." : "New here? Use “Create account”."}
+          </div>
         </div>
       </div>
     </div>
