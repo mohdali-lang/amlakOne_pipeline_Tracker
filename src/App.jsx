@@ -32,6 +32,25 @@ function kpiAchievement(entry, defs) {
   defs.forEach((d) => { const a = Number(entry.values?.[d.key] || 0); sum += d.target ? Math.min(a / d.target, 1) : 0; });
   return Math.round((sum / defs.length) * 100);
 }
+
+// Sum every KPI across a set of daily entries -> one merged {key: total} object.
+function sumEntries(entries) {
+  const totals = {};
+  entries.forEach((e) => Object.entries(e.values || {}).forEach(([k, v]) => { totals[k] = (totals[k] || 0) + Number(v || 0); }));
+  return totals;
+}
+
+// Cumulative achievement %: measured against target × number-of-days-logged,
+// so an agent who hits target every day stays at 100% instead of drifting over 100.
+function cumulativeAchievement(entries, defs) {
+  if (!entries.length || !defs.length) return 0;
+  const days = entries.length;
+  const totals = sumEntries(entries);
+  let sum = 0;
+  defs.forEach((d) => { const a = Number(totals[d.key] || 0); const tgt = d.target * days; sum += tgt ? Math.min(a / tgt, 1) : 0; });
+  return Math.round((sum / defs.length) * 100);
+}
+const inMonth = (iso, ym) => !ym || (iso || "").slice(0, 7) === ym;
 const openValue = (ds) => ds.filter((d) => d.status === "open").reduce((s, d) => s + Number(d.value), 0);
 const weighted = (ds) => ds.filter((d) => d.status === "open").reduce((s, d) => s + Number(d.value) * (d.probability / 100), 0);
 const wonValue = (ds) => ds.filter((d) => d.status === "won").reduce((s, d) => s + Number(d.value), 0);
@@ -274,6 +293,10 @@ function AgentView({ ctx }) {
   const setKpi = (k, v) => { const nv = { ...local, [k]: Math.max(0, Number(v) || 0) }; setLocal(nv); commit(nv); };
   const step = (k, d) => setKpi(k, Number(local[k] || 0) + d);
   const achv = kpiAchievement({ values: local }, defs);
+  // cumulative across all the agent's logged days (today's live edits included)
+  const myEntries = entries.filter((e) => e.agent_id === me);
+  const cumEntries = [{ values: local }, ...myEntries.filter((e) => e.entry_date !== today)];
+  const cumAchv = cumulativeAchievement(cumEntries, defs);
 
   const onSave = async (deal) => { await api.saveDeal({ ...deal, agent_id: me }); await refetch(); setDealModal(null); };
   const onDelete = async (id) => { await api.deleteDeal(id); await refetch(); setDealModal(null); };
@@ -282,7 +305,8 @@ function AgentView({ ctx }) {
     <div>
       <div style={{ fontSize: 12, color: C.mut2 }}>{today}{saving && " · saving…"}</div>
       <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-        <Stat label="Today's KPI" value={`${achv}%`} sub="avg vs target" tone={toneFor(achv)} />
+        <Stat label="KPI (cumulative)" value={`${cumAchv}%`} sub={`${cumEntries.filter((e) => Object.keys(e.values || {}).length).length} days logged`} tone={toneFor(cumAchv)} />
+        <Stat label="Today's KPI" value={`${achv}%`} sub="vs daily target" tone={toneFor(achv)} />
         <Stat label="Pipeline value" value={`AED ${fmtAED(openValue(myDeals))}`} sub={`${myDeals.filter((d) => d.status === "open").length} open`} tone={C.gold} />
         <Stat label="Weighted forecast" value={`AED ${fmtAED(weighted(myDeals))}`} sub="value × probability" tone={C.goldHi} />
         <Stat label="Closing this month" value={closingThisMonth(myDeals).length} sub={`AED ${fmtAED(closingThisMonth(myDeals).reduce((s, d) => s + Number(d.value), 0))}`} />
@@ -389,9 +413,10 @@ function LeaderView({ ctx }) {
   const today = todayISO();
   const roster = people.filter((p) => p.team_id === profile.team_id && p.role === "agent");
   const rows = roster.map((a) => {
-    const entry = entries.find((e) => e.agent_id === a.id && e.entry_date === today);
+    const agentEntries = entries.filter((e) => e.agent_id === a.id);
+    const entry = agentEntries.find((e) => e.entry_date === today);
     const ds = deals.filter((d) => d.agent_id === a.id);
-    return { a, achv: kpiAchievement(entry, defs), open: openValue(ds), wtd: weighted(ds), flags: ds.filter((d) => d.manager_support).length, hasEntry: !!entry };
+    return { a, achv: cumulativeAchievement(agentEntries, defs), open: openValue(ds), wtd: weighted(ds), flags: ds.filter((d) => d.manager_support).length, hasEntry: !!entry };
   });
   const teamDeals = deals.filter((d) => roster.some((a) => a.id === d.agent_id));
   const avgAchv = Math.round(rows.reduce((s, r) => s + r.achv, 0) / (rows.length || 1));
@@ -446,42 +471,81 @@ function MgmtView({ ctx }) {
   const { defs, deals, entries, people, teams, nameOf, teamOf } = ctx;
   const today = todayISO();
 
-  const teamRows = teams.map((t) => {
-    const roster = people.filter((a) => a.team_id === t.id && a.role === "agent");
-    const ds = deals.filter((d) => roster.some((a) => a.id === d.agent_id));
-    const achvs = roster.map((a) => kpiAchievement(entries.find((e) => e.agent_id === a.id && e.entry_date === today), defs));
+  // ---- filters: team, agent, month ----
+  const [fTeam, setFTeam] = useState("");
+  const [fAgent, setFAgent] = useState("");
+  const [fMonth, setFMonth] = useState("");
+  const months = Array.from(new Set(entries.map((e) => (e.entry_date || "").slice(0, 7)).concat(deals.map((d) => (d.expected_close || "").slice(0, 7))).filter(Boolean))).sort().reverse();
+
+  const agentsInScope = people.filter((p) => p.role === "agent" && (!fTeam || p.team_id === fTeam) && (!fAgent || p.id === fAgent));
+  const scopeIds = new Set(agentsInScope.map((a) => a.id));
+  const fDeals = deals.filter((d) => scopeIds.has(d.agent_id) && (!fMonth || inMonth(d.expected_close, fMonth)));
+  const fEntries = entries.filter((e) => scopeIds.has(e.agent_id) && inMonth(e.entry_date, fMonth));
+
+  const clearFilters = () => { setFTeam(""); setFAgent(""); setFMonth(""); };
+  const filtered = fTeam || fAgent || fMonth;
+
+  const teamRows = teams.filter((t) => !fTeam || t.id === fTeam).map((t) => {
+    const roster = agentsInScope.filter((a) => a.team_id === t.id);
+    const ds = fDeals.filter((d) => roster.some((a) => a.id === d.agent_id));
+    const rEntries = fEntries.filter((e) => roster.some((a) => a.id === e.agent_id));
+    const achvs = roster.map((a) => cumulativeAchievement(rEntries.filter((e) => e.agent_id === a.id), defs));
     return { t, agents: roster.length, open: openValue(ds), wtd: weighted(ds), closing: closingThisMonth(ds).length, achv: Math.round(achvs.reduce((s, x) => s + x, 0) / (achvs.length || 1)) };
-  });
-  const agentRows = people.filter((p) => p.role === "agent").map((a) => {
-    const ds = deals.filter((d) => d.agent_id === a.id);
-    return { a, team: teamOf(a.team_id), open: openValue(ds), wtd: weighted(ds), won: wonValue(ds), achv: kpiAchievement(entries.find((e) => e.agent_id === a.id && e.entry_date === today), defs) };
+  }).filter((r) => r.agents > 0);
+  const agentRows = agentsInScope.map((a) => {
+    const ds = fDeals.filter((d) => d.agent_id === a.id);
+    return { a, team: teamOf(a.team_id), open: openValue(ds), wtd: weighted(ds), won: wonValue(ds), achv: cumulativeAchievement(fEntries.filter((e) => e.agent_id === a.id), defs) };
   }).sort((x, y) => y.wtd - x.wtd);
 
-  const kToday = entries.filter((e) => e.entry_date === today);
-  const sumK = (k) => kToday.reduce((s, e) => s + Number(e.values?.[k] || 0), 0);
+  const totals = sumEntries(fEntries);
+  const sumK = (k) => Number(totals[k] || 0);
   const funnel = [
     { l: "New leads", v: sumK("newLeads") }, { l: "Qualified", v: sumK("qualified") },
     { l: "Meetings", v: sumK("meetingsDone") }, { l: "Viewings", v: sumK("viewings") },
     { l: "Reservations", v: sumK("reservations") },
   ];
   const fMax = Math.max(...funnel.map((f) => f.v), 1);
-  const totClosing = closingThisMonth(deals);
+  const totClosing = closingThisMonth(fDeals);
+  const scopeNote = filtered
+    ? [fTeam && teamOf(fTeam), fAgent && nameOf(fAgent), fMonth].filter(Boolean).join(" · ")
+    : "all agents · all time";
 
   const exportCSV = () => {
     const cols = ["deal_id", "agent", "team", "client", "project", "unit", "value_aed", "stage", "probability", "status", "expected_close", "objection", "manager_support"];
     const lines = [cols.join(",")];
-    deals.forEach((d) => lines.push([d.id, nameOf(d.agent_id), teamOf(people.find((p) => p.id === d.agent_id)?.team_id), d.client, d.project, d.unit, d.value, d.stage, d.probability, d.status, d.expected_close, (d.objection || "").replace(/,/g, ";"), d.manager_support ? "YES" : ""].map((x) => `"${x ?? ""}"`).join(",")));
+    fDeals.forEach((d) => lines.push([d.id, nameOf(d.agent_id), teamOf(people.find((p) => p.id === d.agent_id)?.team_id), d.client, d.project, d.unit, d.value, d.stage, d.probability, d.status, d.expected_close, (d.objection || "").replace(/,/g, ";"), d.manager_support ? "YES" : ""].map((x) => `"${x ?? ""}"`).join(",")));
     const blob = new Blob([lines.join("\n")], { type: "text/csv" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "amlak_pipeline_export.csv"; a.click();
   };
 
+  const selStyle = { width: "auto", minWidth: 130, padding: "8px 10px", fontSize: 13 };
+
   return (
     <div>
+      {/* ---- Filter bar ---- */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: C.surf, border: `1px solid ${C.line}`, borderRadius: 12, padding: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: 11, color: C.mut2, textTransform: "uppercase", letterSpacing: ".08em", marginRight: 2 }}>Filter</span>
+        <select value={fTeam} onChange={(e) => { setFTeam(e.target.value); setFAgent(""); }} style={selStyle}>
+          <option value="">All teams</option>
+          {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <select value={fAgent} onChange={(e) => setFAgent(e.target.value)} style={selStyle}>
+          <option value="">All agents</option>
+          {people.filter((p) => p.role === "agent" && (!fTeam || p.team_id === fTeam)).map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+        </select>
+        <select value={fMonth} onChange={(e) => setFMonth(e.target.value)} style={selStyle}>
+          <option value="">All months</option>
+          {months.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+        {filtered && <button onClick={clearFilters} style={{ ...ghostBtn, padding: "7px 12px" }}>Clear</button>}
+        <span style={{ fontSize: 12, color: C.mut, marginLeft: "auto" }}>{scopeNote}</span>
+      </div>
+
       <div style={{ display: "flex", gap: 10, marginTop: 4, flexWrap: "wrap" }}>
-        <Stat label="Total pipeline" value={`AED ${fmtAED(openValue(deals))}`} sub={`${deals.filter((d) => d.status === "open").length} open deals`} tone={C.gold} />
-        <Stat label="Weighted forecast" value={`AED ${fmtAED(weighted(deals))}`} sub="prob-adjusted" tone={C.goldHi} />
+        <Stat label="Total pipeline" value={`AED ${fmtAED(openValue(fDeals))}`} sub={`${fDeals.filter((d) => d.status === "open").length} open deals`} tone={C.gold} />
+        <Stat label="Weighted forecast" value={`AED ${fmtAED(weighted(fDeals))}`} sub="prob-adjusted" tone={C.goldHi} />
         <Stat label="Closing this month" value={`AED ${fmtAED(totClosing.reduce((s, d) => s + Number(d.value), 0))}`} sub={`${totClosing.length} deals`} tone={C.blue} />
-        <Stat label="Won (MTD)" value={`AED ${fmtAED(wonValue(deals))}`} sub={`${deals.filter((d) => d.status === "won").length} closed`} tone={C.green} />
+        <Stat label="Won" value={`AED ${fmtAED(wonValue(fDeals))}`} sub={`${fDeals.filter((d) => d.status === "won").length} closed`} tone={C.green} />
       </div>
 
       <SectionTitle right={<button onClick={exportCSV} style={ghostBtn}>Export CSV</button>}>By team</SectionTitle>
