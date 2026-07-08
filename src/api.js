@@ -69,6 +69,10 @@ export async function upsertEntry(agentId, values, date = todayISO()) {
 export async function saveDeal(deal) {
   const row = { ...deal };
   if (!row.id) delete row.id;
+  // Date columns reject "" — send null when a date field is left blank.
+  ["last_contact", "next_followup", "expected_close"].forEach((k) => {
+    if (row[k] === "" || row[k] === undefined) row[k] = null;
+  });
   const { data, error } = await supabase.from("deals").upsert(row).select().single();
   if (error) throw error;
   return data;
