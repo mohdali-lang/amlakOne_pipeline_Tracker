@@ -492,12 +492,13 @@ function AgentDetail({ agent, ctx, onClose }) {
   const cum = cumulativeAchievement(myEntries, defs);
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 50, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.bg2, border: `1px solid ${C.line}`, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 720, maxHeight: "92vh", overflowY: "auto", padding: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <h3 style={{ fontFamily: "'Playfair Display',serif", margin: 0, fontSize: 20 }}>{agent.full_name}</h3>
-          <button onClick={onClose} style={{ ...ghostBtn, padding: "6px 10px" }}>Close</button>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "#000b", zIndex: 50, display: "flex", alignItems: "flex-end", justifyContent: "center", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.bg2, border: `1px solid ${C.line}`, borderRadius: "18px 18px 0 0", width: "100%", maxWidth: 720, maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 18px 10px", borderBottom: `1px solid ${C.line}`, position: "sticky", top: 0, background: C.bg2, borderRadius: "18px 18px 0 0", flexShrink: 0 }}>
+          <h3 style={{ fontFamily: "'Playfair Display',serif", margin: 0, fontSize: 20, color: C.text }}>{agent.full_name}</h3>
+          <button onClick={onClose} style={{ ...ghostBtn, padding: "6px 12px" }}>Close</button>
         </div>
+        <div style={{ overflowY: "auto", WebkitOverflowScrolling: "touch", padding: 18 }}>
         <div style={{ fontSize: 12, color: C.mut2, marginBottom: 14 }}>{ym} · cumulative KPI {cum}% · {myEntries.length} days logged</div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
@@ -534,6 +535,7 @@ function AgentDetail({ agent, ctx, onClose }) {
             {myDeals.map((d) => <DealRow key={d.id} d={d} />)}
           </div>
         )}
+        </div>
       </div>
     </div>
   );
