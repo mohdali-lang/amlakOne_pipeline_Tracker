@@ -448,7 +448,7 @@ function LeaderView({ ctx }) {
           {rows.length === 0 && <Empty text="No agents assigned to your team yet." />}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {rows.map((r) => (
-              <button key={r.a.id} onClick={() => setOpenAgent(r.a)} style={{ textAlign: "left", cursor: "pointer", width: "100%", background: C.surf, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 14px" }}>
+              <button key={r.a.id} onClick={() => setOpenAgent(r.a)} style={{ textAlign: "left", cursor: "pointer", width: "100%", color: C.text, background: C.surf, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 14px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <div style={{ fontWeight: 600, flex: "1 1 120px" }}>{r.a.full_name}{!r.hasEntry && <span style={{ fontSize: 11, color: C.red, marginLeft: 8 }}>· no entry today</span>}</div>
                   <div style={{ fontSize: 12, color: C.mut }}>Pipeline <b style={{ color: C.gold }}>AED {fmtAED(r.open)}</b></div>
